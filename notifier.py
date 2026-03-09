@@ -12,6 +12,9 @@ class StockNotifier:
         self.tg_chat_id = os.getenv("TELEGRAM_CHAT_ID")
         self.resend_api_key = os.getenv("RESEND_API_KEY")
         
+        # 修正點 1：優先讀取環境變數中的 Email，若無則使用您的預設信箱
+        self.receiver_email = os.getenv("REPORT_RECEIVER_EMAIL", "senseysed@gmail.com")
+        
         if self.resend_api_key:
             resend.api_key = self.resend_api_key
 
@@ -45,10 +48,10 @@ class StockNotifier:
     def send_stock_report(self, market_name, img_data, report_df, text_reports, stats=None):
         """
         🚀 專業版更新：整合智慧下載統計、六國專業平台跳轉
-        支援：將下載器 (Downloader) 的統計結果完美呈現於 HTML 報表頂端
         """
-        # 🟢 Debug 訊息：方便在終端機確認 main.py 傳進來的數值
+        # 🟢 Debug 訊息
         print(f"DEBUG: notifier 正在處理 {market_name} 報告 (Stats: {stats})")
+        print(f"DEBUG: 預計發送至: {self.receiver_email}")
 
         if not self.resend_api_key:
             print("⚠️ 缺少 Resend API Key，無法寄信。")
@@ -56,16 +59,13 @@ class StockNotifier:
 
         report_time = self.get_now_time_str()
         
-        # --- 1. 處理下載統計數據 (防止 0 或 None 導致報表崩潰) ---
+        # --- 1. 處理下載統計數據 ---
         if stats is None:
             stats = {}
 
-        # 應收標的：優先從 stats 拿，拿不到就看 report_df
         total_count = stats.get('total', len(report_df))
-        # 成功家數
         success_count = stats.get('success', len(report_df))
         
-        # 計算今日覆蓋率 (百分比)
         try:
             total_val = int(total_count)
             success_val = int(success_count)
@@ -121,7 +121,7 @@ class StockNotifier:
                 </p>
         """
 
-        # --- 3. 插入九張分析矩陣圖表 ---
+        # --- 3. 插入圖表 ---
         html_content += "<div style='margin-top: 30px;'>"
         for img in img_data:
             html_content += f"""
@@ -132,7 +132,7 @@ class StockNotifier:
             """
         html_content += "</div>"
 
-        # --- 4. 插入文字報酬分布明細 ---
+        # --- 4. 插入文字明細 ---
         html_content += "<div style='margin-top: 20px;'>"
         for period, report in text_reports.items():
             p_name_zh = {"Week": "週", "Month": "月", "Year": "年"}.get(period, period)
@@ -145,15 +145,15 @@ class StockNotifier:
         html_content += "</div>"
 
         html_content += """
-                <p style="margin-top: 40px; font-size: 11px; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
-                    此郵件由 Global Stock Monitor 系統自動發送。數據僅供參考，不構成投資建議。
-                </p>
-            </div>
-        </body>
-        </html>
+                    <p style="margin-top: 40px; font-size: 11px; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
+                        此郵件由 Global Stock Monitor 系統自動發送。數據僅供參考，不構成投資建議。
+                    </p>
+                </div>
+            </body>
+            </html>
         """
 
-        # --- 5. 處理附件 (Inline Embedding) ---
+        # --- 5. 處理附件 ---
         attachments = []
         for img in img_data:
             try:
@@ -165,23 +165,22 @@ class StockNotifier:
                             "content_id": img['id'],
                             "disposition": "inline"
                         })
-                else:
-                    print(f"⚠️ 圖表檔案不存在: {img['path']}")
             except Exception as e:
-                print(f"⚠️ 處理圖表附件失敗 {img['id']}: {e}")
+                print(f"⚠️ 處理圖表附件失敗: {e}")
 
         # --- 6. 寄送 Resend 郵件 ---
         try:
+            # 修正點 2：將原本寫死的 grissomlin643 改為 self.receiver_email
             resend.Emails.send({
                 "from": "StockMonitor <onboarding@resend.dev>",
-                "to": "grissomlin643@gmail.com",
+                "to": self.receiver_email,
                 "subject": f"🚀 {market_name} 全方位監控報告 - {report_time.split(' ')[0]}",
                 "html": html_content,
                 "attachments": attachments
             })
-            print(f"✅ {market_name} 郵件報告已寄送！")
+            print(f"✅ {market_name} 郵件報告已寄送至 {self.receiver_email}！")
             
-            # --- 7. 發送 Telegram 簡報 ---
+            # --- 7. 發送 Telegram ---
             tg_msg = f"📊 <b>{market_name} 監控報表已送達</b>\n涵蓋率: {success_rate}\n處理樣本: {success_count} 檔"
             self.send_telegram(tg_msg)
             
