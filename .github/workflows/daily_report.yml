@@ -35,8 +35,6 @@ jobs:
           - { id: "kr-share", name: "Korea",  emoji: "🇰🇷" }
 
     steps:
-      # 💡 修正點：將判斷移到第一個 Step 的 if 中
-      # 這樣如果不符合，第一個步驟就會跳過，後續步驟也會因為沒執行而停止
       - name: Check if market should run
         id: check_run
         run: |
@@ -47,7 +45,6 @@ jobs:
           github.event.inputs.market_choice == matrix.market.id
 
       - name: Checkout Code
-        # 💡 使用上次 Check 的結果來決定是否執行
         if: steps.check_run.outcome == 'success'
         uses: actions/checkout@v4
 
@@ -81,4 +78,5 @@ jobs:
         if: steps.check_run.outcome == 'success'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          REPORT_RECEIVER_EMAIL: ${{ secrets.REPORT_RECEIVER_EMAIL }}
         run: python main.py --market ${{ matrix.market.id }}
