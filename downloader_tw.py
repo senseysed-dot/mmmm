@@ -2,6 +2,7 @@
 import os
 import time
 import random
+import requests
 import pandas as pd
 import yfinance as yf
 from io import StringIO
@@ -12,48 +13,101 @@ from datetime import datetime
 
 # ========== 核心參數設定 ==========
 MARKET_CODE = "tw-share"
-# 將檔案直接存入 main.py 預期的 data/ 目錄下
+# 確保資料統一存放在 data/ 目錄下
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data") 
+DATA_DIR = os.path.join(BASE_DIR, "data")
 MERGED_FILE = os.path.join(DATA_DIR, f"{MARKET_CODE}_latest.csv")
 
+# 效能參數
 MAX_WORKERS = 3 
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
+def log(msg: str):
+    print(f"{pd.Timestamp.now():%H:%M:%S}: {msg}")
+
 def merge_data():
-    """將所有下載的個股資料合併為一份供篩選器使用"""
+    """將 data/ 下的所有個股 CSV 合併為一份供 main.py 讀取"""
+    log("🔄 正在合併所有個股數據...")
     all_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv') and f != f"{MARKET_CODE}_latest.csv"]
     combined_data = []
+    
     for f in all_files:
         try:
+            # 讀取個股 CSV
             df = pd.read_csv(os.path.join(DATA_DIR, f))
-            # 加入代號欄位標識
-            df['symbol'] = f.split('_')[0] 
-            combined_data.append(df.tail(1)) # 取最新一筆
+            if not df.empty:
+                # 提取代號 (假設檔名格式為 code_name.csv)
+                symbol = f.split('_')[0]
+                latest_row = df.tail(1).copy()
+                latest_row['symbol'] = symbol
+                combined_data.append(latest_row)
         except: continue
     
     if combined_data:
         final_df = pd.concat(combined_data)
-        final_df.to_csv(MERGED_FILE, index=False)
-        print(f"✅ 已合併 {len(combined_data)} 檔資料至 {MERGED_FILE}")
+        final_df.to_csv(MERGED_FILE, index=False, encoding='utf-8-sig')
+        log(f"✅ 合併完成，產出檔案: {MERGED_FILE}")
+    else:
+        log("⚠️ 未找到可合併的個股資料。")
 
-# ... (中間的 get_full_stock_list 與 download_stock_data 保持不變) ...
+def get_full_stock_list():
+    """獲取台股全市場清單"""
+    url_configs = [
+        {'name': 'listed', 'url': 'https://isin.twse.com.tw/isin/class_main.jsp?market=1&issuetype=1&Page=1&chklike=Y', 'suffix': '.TW'},
+        {'name': 'otc', 'url': 'https://isin.twse.com.tw/isin/class_main.jsp?market=2&issuetype=4&Page=1&chklike=Y', 'suffix': '.TWO'},
+    ]
+    all_items = []
+    for cfg in url_configs:
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            resp = requests.get(cfg['url'], timeout=15, headers=headers)
+            df = pd.read_html(StringIO(resp.text), header=0)[0]
+            for _, row in df.iterrows():
+                code = str(row['有價證券代號']).strip()
+                name = str(row['有價證券名稱']).strip()
+                if code.isdigit() and len(code) == 4:
+                    all_items.append(f"{code}{cfg['suffix']}&{name}")
+        except: continue
+    return list(set(all_items))
+
+def download_stock_data(item):
+    """下載單檔股票"""
+    try:
+        yf_tkr, name = item.split('&', 1)
+        safe_name = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        out_path = os.path.join(DATA_DIR, f"{yf_tkr}_{safe_name}.csv")
+        
+        # 快取：今日已下載則跳過
+        if os.path.exists(out_path):
+            mtime = datetime.fromtimestamp(os.path.getmtime(out_path)).date()
+            if mtime == datetime.now().date(): return {"status": "exists", "tkr": yf_tkr}
+
+        time.sleep(random.uniform(0.5, 1.0))
+        hist = yf.Ticker(yf_tkr).history(period="3mo", timeout=10) # 取 3 個月夠計算指標
+        if not hist.empty:
+            hist.reset_index(inplace=True)
+            hist.columns = [c.lower() for c in hist.columns]
+            hist.to_csv(out_path, index=False, encoding='utf-8-sig')
+            return {"status": "success", "tkr": yf_tkr}
+        return {"status": "empty", "tkr": yf_tkr}
+    except: return {"status": "error", "tkr": yf_tkr}
 
 def main():
     items = get_full_stock_list()
-    if not items: return {"total": 0, "success": 0, "fail": 0}
+    log(f"🚀 啟動下載，目標總數: {len(items)}")
     
-    # ... (執行 ThreadPoolExecutor 下載的部分保持不變) ...
-    
-    # 下載完成後，執行合併
+    stats = {"success": 0, "exists": 0, "empty": 0, "error": 0}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(download_stock_data, it): it for it in items}
+        for future in tqdm(as_completed(futures), total=len(items)):
+            stats[future.result()["status"]] += 1
+            
+    # 完成下載後執行合併
     merge_data()
     
-    report_stats = {
-        "total": len(items),
-        "success": stats["success"] + stats["exists"],
-        "fail": stats["error"] + stats["empty"]
-    }
-    return report_stats
+    report = {"total": len(items), "success": stats["success"] + stats["exists"], "fail": stats["error"] + stats["empty"]}
+    log(f"📊 下載任務完成: {report}")
+    return report
 
 if __name__ == "__main__":
     main()
