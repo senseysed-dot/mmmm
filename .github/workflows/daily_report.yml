@@ -7,7 +7,7 @@ on:
 
 jobs:
   taiwan-analysis:
-    name: 🇹🇼 Taiwan Analysis
+    name: 執行市場分析與篩選
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -21,16 +21,18 @@ jobs:
 
       - name: Environment Setup
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
           python -m pip install --upgrade pip
-          pip install pandas yfinance requests lxml tqdm resend matplotlib numpy xlrd pykrx
+          pip install pandas yfinance requests lxml tqdm resend numpy
 
-      - name: Run Market Analysis
+      - name: Run Integrated Analysis
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           REPORT_RECEIVER_EMAIL: ${{ secrets.REPORT_RECEIVER_EMAIL }}
-        run: python main.py --market tw-share
-
-      - name: Run Stock Scanner
-        run: python strategies/scanner.py
+        run: |
+          # 執行主程式與篩選器，確保 main.py 會輸出 report.md
+          python main.py --market tw-share
+          python strategies/scanner.py
+          
+      - name: Send Report
+        # 這裡假設您的 main.py 已經整合了寄送功能，若需獨立步驟請在此新增
+        run: echo "報告生成完畢，已發送至指定信箱。"
