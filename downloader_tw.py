@@ -43,7 +43,8 @@ def merge_data():
                 df = df.copy()
                 df['symbol'] = symbol
                 combined_data.append(df)
-        except: continue
+        except Exception as e:
+            log(f"⚠️ 讀取 {f} 失敗，略過: {e}")
     
     if combined_data:
         final_df = pd.concat(combined_data, ignore_index=True)
@@ -69,6 +70,7 @@ def get_full_stock_list():
 
             # 嘗試不同的 header 列設定以應對頁面結構差異
             df = None
+            failed_attempts = []
             for h in [0, 1, None]:
                 try:
                     tables = pd.read_html(StringIO(resp.text), header=h)
@@ -78,11 +80,13 @@ def get_full_stock_list():
                             break
                     if df is not None:
                         break
-                    log(f"  [{cfg['name']}] header={h} 未找到目標欄位，嘗試下一種設定...")
+                    failed_attempts.append(f"header={h}: 未找到目標欄位")
                 except Exception as parse_err:
-                    log(f"  [{cfg['name']}] header={h} 解析失敗: {parse_err}，嘗試下一種設定...")
+                    failed_attempts.append(f"header={h}: {parse_err}")
 
             if df is None or df.empty:
+                for msg in failed_attempts:
+                    log(f"  [{cfg['name']}] {msg}")
                 log(f"⚠️ [{cfg['name']}] 無法在回應中找到含 '{CODE_COL}' 欄位的表格，請確認 TWSE 頁面格式是否改變。")
                 continue
 
@@ -116,16 +120,18 @@ def download_stock_data(item):
             if mtime == datetime.now().date(): return {"status": "exists", "tkr": yf_tkr}
 
         time.sleep(random.uniform(0.5, 1.0))
-        hist = yf.Ticker(yf_tkr).history(period="6mo", timeout=10) # 取 6 個月確保 MA60 有足夠資料
+        hist = yf.Ticker(yf_tkr).history(period="6mo", timeout=10) # MA60 需 60 個交易日；取 6 個月提供足夠緩衝
         if not hist.empty:
             hist.reset_index(inplace=True)
             hist.columns = [c.lower() for c in hist.columns]
-            # 統一日期格式為 YYYY-MM-DD (去除時區資訊)
+            # 統一日期格式為 YYYY-MM-DD (tz_localize(None) 保留本地日期，不轉換為 UTC)
             hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None).dt.strftime('%Y-%m-%d')
             hist.to_csv(out_path, index=False, encoding='utf-8-sig')
             return {"status": "success", "tkr": yf_tkr}
         return {"status": "empty", "tkr": yf_tkr}
-    except: return {"status": "error", "tkr": yf_tkr}
+    except Exception as e:
+        log(f"⚠️ 下載 {item.split('&')[0]} 失敗: {e}")
+        return {"status": "error", "tkr": item.split('&')[0]}
 
 def main():
     items = get_full_stock_list()
