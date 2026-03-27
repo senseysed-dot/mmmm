@@ -26,27 +26,25 @@ def log(msg: str):
     print(f"{pd.Timestamp.now():%H:%M:%S}: {msg}")
 
 def merge_data():
-    """將 data/ 下的所有個股 CSV 合併為一份供 main.py 讀取"""
+    """將 data/ 下的所有個股 CSV 合併為一份供 main.py 讀取（保留完整歷史，供策略計算指標用）"""
     log("🔄 正在合併所有個股數據...")
     all_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv') and f != f"{MARKET_CODE}_latest.csv"]
     combined_data = []
     
     for f in all_files:
         try:
-            # 讀取個股 CSV
             df = pd.read_csv(os.path.join(DATA_DIR, f))
             if not df.empty:
-                # 提取代號 (假設檔名格式為 code_name.csv)
                 symbol = f.split('_')[0]
-                latest_row = df.tail(1).copy()
-                latest_row['symbol'] = symbol
-                combined_data.append(latest_row)
+                df = df.copy()
+                df['symbol'] = symbol
+                combined_data.append(df)
         except: continue
     
     if combined_data:
-        final_df = pd.concat(combined_data)
+        final_df = pd.concat(combined_data, ignore_index=True)
         final_df.to_csv(MERGED_FILE, index=False, encoding='utf-8-sig')
-        log(f"✅ 合併完成，產出檔案: {MERGED_FILE}")
+        log(f"✅ 合併完成，產出檔案: {MERGED_FILE} (共 {len(final_df)} 行，{len(combined_data)} 檔個股)")
     else:
         log("⚠️ 未找到可合併的個股資料。")
 
@@ -87,6 +85,8 @@ def download_stock_data(item):
         if not hist.empty:
             hist.reset_index(inplace=True)
             hist.columns = [c.lower() for c in hist.columns]
+            # 統一日期格式為 YYYY-MM-DD (去除時區資訊)
+            hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None).dt.strftime('%Y-%m-%d')
             hist.to_csv(out_path, index=False, encoding='utf-8-sig')
             return {"status": "success", "tkr": yf_tkr}
         return {"status": "empty", "tkr": yf_tkr}

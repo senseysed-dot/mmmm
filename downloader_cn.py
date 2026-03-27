@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, time, random, json, subprocess
+import os, time, random, json
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
