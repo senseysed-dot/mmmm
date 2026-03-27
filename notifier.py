@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import re
 import requests
 import resend
 from datetime import datetime, timedelta
@@ -32,6 +33,51 @@ class StockNotifier:
             print(f"⚠️ Telegram 發送失敗: {e}")
             return False
 
+    def _markdown_to_html(self, markdown_content):
+        """將 Markdown 文字（含表格）轉換為 HTML"""
+        lines = markdown_content.split('\n')
+        result = []
+        in_table = False
+        first_row = True
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('### '):
+                result.append(f'<h3>{stripped[4:]}</h3>')
+            elif '|' in stripped:
+                cells = [c.strip() for c in stripped.strip('|').split('|')]
+                # Skip separator row (e.g., |:---|:---|)
+                if all(re.match(r'^[-: ]+$', c) for c in cells if c):
+                    continue
+                if not in_table:
+                    result.append('<table style="border-collapse:collapse;width:100%;font-size:14px;">')
+                    in_table = True
+                    first_row = True
+                if first_row:
+                    cells_html = ''.join(
+                        f'<th style="padding:6px 12px;background:#2c3e50;color:white;text-align:left;">{c}</th>'
+                        for c in cells
+                    )
+                    result.append(f'<tr>{cells_html}</tr>')
+                    first_row = False
+                else:
+                    cells_html = ''.join(
+                        f'<td style="padding:6px 12px;border-bottom:1px solid #ddd;">{c}</td>'
+                        for c in cells
+                    )
+                    result.append(f'<tr>{cells_html}</tr>')
+            else:
+                if in_table:
+                    result.append('</table>')
+                    in_table = False
+                if stripped:
+                    result.append(f'<p>{stripped}</p>')
+
+        if in_table:
+            result.append('</table>')
+
+        return '\n'.join(result)
+
     def send_markdown_report(self, subject, markdown_content):
         """
         🚀 專門用於發送 Markdown 表格報告的新方法
@@ -40,15 +86,14 @@ class StockNotifier:
             print("⚠️ 缺少 Resend API Key，無法寄信。")
             return False
 
-        # 將 Markdown 簡單轉為 HTML 格式以利 Email 呈現
-        # 這裡將內容包裹在簡單的 HTML 容器中
+        html_body = self._markdown_to_html(markdown_content)
         html_content = f"""
         <html>
         <body style="font-family: sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+            <div style="max-width: 720px; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
                 <h2 style="color: #2c3e50;">市場監控報告</h2>
-                <div style="background: #f4f4f4; padding: 15px; border-radius: 5px;">
-                    {markdown_content.replace('|', '</td><td>').replace('---', '').replace('###', '<h3>')}
+                <div style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+                    {html_body}
                 </div>
                 <p style="font-size: 12px; color: #888; margin-top: 20px;">
                     由自動化監控系統發送。
