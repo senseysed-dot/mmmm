@@ -120,12 +120,20 @@ def download_stock_data(item):
             if mtime == datetime.now().date(): return {"status": "exists", "tkr": yf_tkr}
 
         time.sleep(random.uniform(0.5, 1.0))
-        hist = yf.Ticker(yf_tkr).history(period="6mo", timeout=10) # MA60 需 60 個交易日；取 6 個月提供足夠緩衝
+        tkr_obj = yf.Ticker(yf_tkr)
+        hist = tkr_obj.history(period="6mo", timeout=10) # MA60 需 60 個交易日；取 6 個月提供足夠緩衝
         if not hist.empty:
             hist.reset_index(inplace=True)
             hist.columns = [c.lower() for c in hist.columns]
             # 統一日期格式為 YYYY-MM-DD (tz_localize(None) 保留本地日期，不轉換為 UTC)
             hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None).dt.strftime('%Y-%m-%d')
+            # 取得股本資訊（供篩選股本2億以下的股票）
+            try:
+                shares = tkr_obj.fast_info.shares
+                if shares and shares > 0:
+                    hist['shares_outstanding'] = int(shares)
+            except Exception:
+                pass
             hist.to_csv(out_path, index=False, encoding='utf-8-sig')
             return {"status": "success", "tkr": yf_tkr}
         return {"status": "empty", "tkr": yf_tkr}

@@ -39,13 +39,22 @@ def scan_stocks(stock_data):
 
     total = len(latest)
     cond_ma    = latest['ma20'] > latest['ma60']
-    cond_vol   = latest['volume'] > (latest['avg_volume_5'] * 1.5)
+    cond_vol   = latest['volume'] > (latest['avg_volume_5'] * 1.2)
     cond_rsi   = latest['rsi'] > 50
 
-    print(f"  [篩選統計] 有效股票: {total} 支 | MA多頭: {cond_ma.sum()} | 放量: {cond_vol.sum()} | RSI>50: {cond_rsi.sum()} | 全部通過: {(cond_ma & cond_vol & cond_rsi).sum()}")
+    # 股本篩選：排除股本 2億元以下（台股面值 NT$10，故股數 < 2,000萬股視為過小）
+    # shares_outstanding 欄位若存在才過濾；若資料缺失則視為通過（避免誤刪）
+    if 'shares_outstanding' in latest.columns:
+        latest['shares_outstanding'] = pd.to_numeric(latest['shares_outstanding'], errors='coerce')
+        cond_capital = latest['shares_outstanding'].isna() | (latest['shares_outstanding'] * 10 >= 200_000_000)
+        print(f"  [股本篩選] 股本≥2億: {cond_capital.sum()} 支 | 股本<2億(排除): {(~cond_capital).sum()} 支")
+    else:
+        cond_capital = pd.Series(True, index=latest.index)
 
-    # 5. 執行篩選：MA多頭 + 放量 + RSI強勢
-    selected = latest[cond_ma & cond_vol & cond_rsi]
+    print(f"  [篩選統計] 有效股票: {total} 支 | MA多頭: {cond_ma.sum()} | 放量: {cond_vol.sum()} | RSI>50: {cond_rsi.sum()} | 全部通過: {(cond_ma & cond_vol & cond_rsi & cond_capital).sum()}")
+
+    # 5. 執行篩選：MA多頭 + 放量 + RSI強勢 + 股本≥2億
+    selected = latest[cond_ma & cond_vol & cond_rsi & cond_capital]
 
     # 6. 回傳精簡結果（僅回傳關鍵欄位以節省 Email 版面）
     result = selected.sort_values(by='volume', ascending=False).copy()
