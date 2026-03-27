@@ -5,16 +5,13 @@ matplotlib
 
 # --- 數據獲取 (核心) ---
 yfinance
+requests
+lxml
 tqdm
 resend
+tabulate
 
-# --- 中國 A 股 ---
-akshare
-
-# --- 日本股市 (Tokyo Stock Exchange) ---
-
-tokyo-stock-exchange
-
-# --- 韓國股市 (Korea Exchange) ---
-# pykrx 是目前公認最強、最穩定的韓國股市套件
-pykrx
+# --- 其他市場（選用，目前 CI 僅啟用台股）---
+# akshare          # 中國 A 股
+# tokyo-stock-exchange  # 日本股市
+# pykrx            # 韓國股市

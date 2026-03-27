@@ -18,6 +18,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 MERGED_FILE = os.path.join(DATA_DIR, f"{MARKET_CODE}_latest.csv")
 
+# TWSE HTML 表格欄位名稱
+TWSE_CODE_COL = '有價證券代號'
+TWSE_NAME_COL = '有價證券名稱'
+
 # 效能參數
 MAX_WORKERS = 3 
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
@@ -39,7 +43,8 @@ def merge_data():
                 df = df.copy()
                 df['symbol'] = symbol
                 combined_data.append(df)
-        except: continue
+        except Exception as e:
+            log(f"⚠️ 讀取 {f} 失敗，略過: {e}")
     
     if combined_data:
         final_df = pd.concat(combined_data, ignore_index=True)
@@ -54,18 +59,52 @@ def get_full_stock_list():
         {'name': 'listed', 'url': 'https://isin.twse.com.tw/isin/class_main.jsp?market=1&issuetype=1&Page=1&chklike=Y', 'suffix': '.TW'},
         {'name': 'otc', 'url': 'https://isin.twse.com.tw/isin/class_main.jsp?market=2&issuetype=4&Page=1&chklike=Y', 'suffix': '.TWO'},
     ]
+    CODE_COL = TWSE_CODE_COL
+    NAME_COL = TWSE_NAME_COL
     all_items = []
     for cfg in url_configs:
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
             resp = requests.get(cfg['url'], timeout=15, headers=headers)
-            df = pd.read_html(StringIO(resp.text), header=0)[0]
+            resp.raise_for_status()
+
+            # 嘗試不同的 header 列設定以應對頁面結構差異
+            df = None
+            failed_attempts = []
+            for h in [0, 1, None]:
+                try:
+                    tables = pd.read_html(StringIO(resp.text), header=h)
+                    for t in tables:
+                        if CODE_COL in t.columns and NAME_COL in t.columns:
+                            df = t
+                            break
+                    if df is not None:
+                        break
+                    failed_attempts.append(f"header={h}: 未找到目標欄位")
+                except Exception as parse_err:
+                    failed_attempts.append(f"header={h}: {parse_err}")
+
+            if df is None or df.empty:
+                for msg in failed_attempts:
+                    log(f"  [{cfg['name']}] {msg}")
+                log(f"⚠️ [{cfg['name']}] 無法在回應中找到含 '{CODE_COL}' 欄位的表格，請確認 TWSE 頁面格式是否改變。")
+                continue
+
+            count = 0
             for _, row in df.iterrows():
-                code = str(row['有價證券代號']).strip()
-                name = str(row['有價證券名稱']).strip()
+                code = str(row[CODE_COL]).strip()
+                name = str(row[NAME_COL]).strip()
                 if code.isdigit() and len(code) == 4:
                     all_items.append(f"{code}{cfg['suffix']}&{name}")
-        except: continue
+                    count += 1
+            log(f"✅ [{cfg['name']}] 取得 {count} 支股票")
+        except Exception as e:
+            log(f"❌ [{cfg['name']}] 取得股票清單失敗: {e}")
+
+    if not all_items:
+        log("❌ 嚴重警告：股票清單為空！所有來源均無法取得資料，下載將中止。")
+    else:
+        log(f"📋 股票清單總計: {len(all_items)} 支")
     return list(set(all_items))
 
 def download_stock_data(item):
@@ -81,16 +120,18 @@ def download_stock_data(item):
             if mtime == datetime.now().date(): return {"status": "exists", "tkr": yf_tkr}
 
         time.sleep(random.uniform(0.5, 1.0))
-        hist = yf.Ticker(yf_tkr).history(period="3mo", timeout=10) # 取 3 個月夠計算指標
+        hist = yf.Ticker(yf_tkr).history(period="6mo", timeout=10) # MA60 需 60 個交易日；取 6 個月提供足夠緩衝
         if not hist.empty:
             hist.reset_index(inplace=True)
             hist.columns = [c.lower() for c in hist.columns]
-            # 統一日期格式為 YYYY-MM-DD (去除時區資訊)
+            # 統一日期格式為 YYYY-MM-DD (tz_localize(None) 保留本地日期，不轉換為 UTC)
             hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None).dt.strftime('%Y-%m-%d')
             hist.to_csv(out_path, index=False, encoding='utf-8-sig')
             return {"status": "success", "tkr": yf_tkr}
         return {"status": "empty", "tkr": yf_tkr}
-    except: return {"status": "error", "tkr": yf_tkr}
+    except Exception as e:
+        log(f"⚠️ 下載 {item.split('&')[0]} 失敗: {e}")
+        return {"status": "error", "tkr": item.split('&')[0]}
 
 def main():
     items = get_full_stock_list()

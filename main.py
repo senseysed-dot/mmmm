@@ -22,7 +22,8 @@ def run_market_pipeline(market_id, market_name, emoji):
     print(f"\n{emoji} 啟動管線：{market_name}")
     
     # --- 統一設定路徑 ---
-    DATA_DIR = 'data'
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, 'data')
     CSV_FILE = f'{market_id}_latest.csv'
     CSV_PATH = os.path.join(DATA_DIR, CSV_FILE)
     
@@ -45,7 +46,10 @@ def run_market_pipeline(market_id, market_name, emoji):
     # --- Step 3: 篩選與報告 ---
     print(f"🔍 正在篩選 {market_name} 強勢股...")
     stock_data = pd.read_csv(CSV_PATH)
+    unique_stocks = stock_data['symbol'].nunique() if 'symbol' in stock_data.columns else 0
+    print(f"  載入 {len(stock_data)} 行資料，共 {unique_stocks} 支個股")
     selected = scan_stocks(stock_data)
+    print(f"  符合條件的強勢股: {len(selected)} 支")
     
     # --- Step 4: 生成並發送報告 ---
     md_content = generate_markdown_report(selected)
