@@ -48,6 +48,15 @@ def scan_stocks(stock_data):
     selected = latest[cond_ma & cond_vol & cond_rsi]
 
     # 6. 回傳精簡結果（僅回傳關鍵欄位以節省 Email 版面）
-    result = selected.sort_values(by='volume', ascending=False)
-    return result[['symbol', 'close', 'volume', 'ma20', 'ma60', 'rsi']]
+    result = selected.sort_values(by='volume', ascending=False).copy()
+
+    # 建議買價：以當日收盤價為參考進場點（四捨五入至小數點後2位）
+    result['suggested_buy'] = result['close'].round(2)
+
+    # 建議停損價：以 MA20 為支撐，若 MA20 低於收盤 5% 則改用收盤 * 0.95 作為底線
+    result['suggested_stop_loss'] = result[['ma20', 'close']].apply(
+        lambda r: round(max(r['ma20'], r['close'] * 0.95), 2), axis=1
+    )
+
+    return result[['symbol', 'close', 'volume', 'ma20', 'ma60', 'rsi', 'suggested_buy', 'suggested_stop_loss']]
 

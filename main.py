@@ -56,7 +56,7 @@ def run_market_pipeline(market_id, market_name, emoji):
     
     agent = notifier.StockNotifier()
     subject = f"【強勢股】{market_name} 觀察清單 - {datetime.now().strftime('%Y-%m-%d')}"
-    success = agent.send_markdown_report(subject=subject, markdown_content=md_content)
+    success = agent.send_markdown_report(subject=subject, markdown_content=md_content, selected_stocks_df=selected)
     
     if success:
         print("✅ 報告已成功寄送至您的信箱。")
