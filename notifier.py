@@ -5,6 +5,8 @@ import requests
 import resend
 from datetime import datetime, timedelta
 
+_TELEGRAM_MAX_LEN = 4096
+
 class StockNotifier:
     def __init__(self):
         self.tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -22,16 +24,43 @@ class StockNotifier:
     def send_telegram(self, message):
         """發送 Telegram 即時通知"""
         if not self.tg_token or not self.tg_chat_id:
+            print("⚠️ 缺少 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID，跳過 Telegram 通知。")
             return False
         
         url = f"https://api.telegram.org/bot{self.tg_token}/sendMessage"
         payload = {"chat_id": self.tg_chat_id, "text": message, "parse_mode": "HTML"}
         try:
-            requests.post(url, json=payload, timeout=10)
+            resp = requests.post(url, json=payload, timeout=10)
+            if not resp.ok:
+                print(f"⚠️ Telegram API 回傳錯誤: {resp.status_code} {resp.text}")
+                return False
             return True
         except Exception as e:
             print(f"⚠️ Telegram 發送失敗: {e}")
             return False
+
+    def send_stock_list_telegram(self, subject, selected_stocks_df):
+        """將強勢股清單格式化後直接發送至 Telegram"""
+        if selected_stocks_df is None or selected_stocks_df.empty:
+            return self.send_telegram(f"📊 <b>{subject}</b>\n\n今日無符合條件的強勢股。")
+
+        lines = [f"📊 <b>{subject}</b>\n"]
+        for _, row in selected_stocks_df.iterrows():
+            symbol = row.get('symbol', '')
+            close  = row.get('close', 0)
+            rsi    = row.get('rsi', 0)
+            buy    = row.get('suggested_buy', close)
+            stop   = row.get('suggested_stop_loss', '')
+            lines.append(
+                f"🔹 <b>{symbol}</b>  收{close:.2f}  RSI:{rsi:.1f}\n"
+                f"   建議買價: <b>{buy:.2f}</b>  停損: <b>{stop:.2f}</b>"
+            )
+
+        message = "\n".join(lines)
+        # Telegram 單則訊息最多 4096 字元，超過則截斷
+        if len(message) > _TELEGRAM_MAX_LEN:
+            message = message[:_TELEGRAM_MAX_LEN - 6] + "\n…"
+        return self.send_telegram(message)
 
     def _markdown_to_html(self, markdown_content):
         """將 Markdown 文字（含表格）轉換為 HTML"""
@@ -78,7 +107,7 @@ class StockNotifier:
 
         return '\n'.join(result)
 
-    def send_markdown_report(self, subject, markdown_content):
+    def send_markdown_report(self, subject, markdown_content, selected_stocks_df=None):
         """
         🚀 專門用於發送 Markdown 表格報告的新方法
         """
@@ -112,8 +141,8 @@ class StockNotifier:
             })
             print(f"✅ 報告已寄送至 {self.receiver_email}")
             
-            # 同步發送 Telegram 通知
-            self.send_telegram(f"📊 {subject} 已送達信箱。")
+            # 同步發送 Telegram 通知（含完整股票清單）
+            self.send_stock_list_telegram(subject, selected_stocks_df)
             return True
         except Exception as e:
             print(f"❌ 郵件寄送失敗: {e}")
