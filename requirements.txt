@@ -2,6 +2,11 @@
 pandas
 numpy
 matplotlib
+tabulate
+
+# --- 網路請求 ---
+requests
+lxml
 
 # --- 數據獲取 (核心) ---
 yfinance

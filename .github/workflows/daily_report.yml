@@ -2,13 +2,14 @@ name: TW市場監控報告
 
 on:
   schedule:
-    - cron: '30 10 * * 1-5'
+    - cron: '0 1 * * 1-5'   # 台灣時間 09:00（UTC+8 = 01:00 UTC），週一至週五開盤時啟動
   workflow_dispatch:
 
 jobs:
   taiwan-analysis:
     name: 執行市場分析與篩選
     runs-on: ubuntu-latest
+    timeout-minutes: 300   # 最多執行 5 小時（台股盤中 4.5 小時 + 緩衝）
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -28,9 +29,9 @@ jobs:
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           REPORT_RECEIVER_EMAIL: ${{ secrets.REPORT_RECEIVER_EMAIL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # 執行主程式（內含下載、篩選、寄信）
+          # 啟動盤中持續掃描模式（09:00 開盤後每 30 分鐘掃描一次，直至 13:30 收盤）
           python main.py --market tw-share
-      - name: Send Report
-        # 這裡假設您的 main.py 已經整合了寄送功能，若需獨立步驟請在此新增
-        run: echo "報告生成完畢，已發送至指定信箱。"
+

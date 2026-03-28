@@ -23,7 +23,8 @@ TWSE_CODE_COL = '有價證券代號'
 TWSE_NAME_COL = '有價證券名稱'
 
 # 效能參數
-MAX_WORKERS = 3 
+MAX_WORKERS = 3
+MIN_CAPITAL_BILLION = 20  # 資本額門檻（億元），低於此值的股票將被排除
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
 def log(msg: str):
@@ -39,9 +40,14 @@ def merge_data():
         try:
             df = pd.read_csv(os.path.join(DATA_DIR, f))
             if not df.empty:
-                symbol = f.split('_')[0]
+                # 從檔名解析代號與名稱（格式：1101.TW_台泥.csv）
+                stem = f.replace('.csv', '')
+                parts = stem.split('_', 1)
+                symbol = parts[0]
+                name = parts[1] if len(parts) > 1 else parts[0]
                 df = df.copy()
                 df['symbol'] = symbol
+                df['name'] = name
                 combined_data.append(df)
         except: continue
     
@@ -52,8 +58,71 @@ def merge_data():
     else:
         log("⚠️ 未找到可合併的個股資料。")
 
+def get_capital_filter():
+    """
+    從 TWSE / TPEX 公開資料取得實收資本額 ≥ MIN_CAPITAL_BILLION 億的股票代號集合。
+    回傳 set of str（純數字代碼，如 '2330'）；若兩個來源皆失敗則回傳 None（呼叫端跳過篩選）。
+    """
+    min_cap = MIN_CAPITAL_BILLION * 1e8  # 單位：元（億 → 元 需乘以 1e8）
+    valid = set()
+
+    # --- 上市公司 (TWSE opendata) ---
+    try:
+        r = requests.get(
+            'https://opendata.twse.com.tw/v1/opendata/t187ap03_L',
+            headers={'User-Agent': 'Mozilla/5.0'}, timeout=15
+        )
+        r.raise_for_status()
+        for row in r.json():
+            code = str(row.get('公司代號', '')).strip()
+            # 欄位名稱可能含括號，嘗試多種寫法
+            cap_raw = str(row.get('實收資本額(元)', row.get('實收資本額', '0'))).replace(',', '').strip()
+            try:
+                if code.isdigit() and float(cap_raw) >= min_cap:
+                    valid.add(code)
+            except Exception:
+                pass
+        log(f"📋 上市資本額篩選：符合 ≥{MIN_CAPITAL_BILLION}億 共 {len(valid)} 支")
+    except Exception as e:
+        log(f"⚠️ 上市資本額 API 失敗: {e}")
+
+    # --- 上櫃公司 (TPEX openapi) ---
+    otc_before = len(valid)
+    try:
+        r2 = requests.get(
+            'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_companies_profile',
+            headers={'User-Agent': 'Mozilla/5.0'}, timeout=15
+        )
+        r2.raise_for_status()
+        for row in r2.json():
+            code = str(row.get('SecuritiesCompanyCode', row.get('股票代號', ''))).strip()
+            cap_raw = str(row.get('PaidInCapital', row.get('實收資本額', '0'))).replace(',', '').strip()
+            try:
+                cap = float(cap_raw)
+                # TPEX API 資本額單位為千元（若數值 < 1e7 則推斷為千元格式），需乘以 1000 換算為元
+                if cap < 1e7:
+                    cap *= 1000
+                if code.isdigit() and cap >= min_cap:
+                    valid.add(code)
+            except Exception:
+                pass
+        log(f"📋 上櫃資本額篩選：符合 ≥{MIN_CAPITAL_BILLION}億 共 {len(valid) - otc_before} 支")
+    except Exception as e:
+        log(f"⚠️ 上櫃資本額 API 失敗: {e}")
+
+    if not valid:
+        log(f"⚠️ 資本額篩選資料無法取得，將納入全部股票")
+        return None  # None 代表不篩選
+
+    log(f"✅ 資本額篩選完成：共 {len(valid)} 支股票符合 ≥{MIN_CAPITAL_BILLION}億")
+    return valid
+
+
 def get_full_stock_list():
-    """獲取台股全市場清單"""
+    """獲取台股全市場清單（已過濾資本額 < 20億的股票）"""
+    # 先取得資本額篩選集合（純數字代碼）
+    capital_filter = get_capital_filter()
+
     url_configs = [
         {'name': 'listed', 'url': 'https://isin.twse.com.tw/isin/class_main.jsp?market=1&issuetype=1&Page=1&chklike=Y', 'suffix': '.TW'},
         {'name': 'otc', 'url': 'https://isin.twse.com.tw/isin/class_main.jsp?market=2&issuetype=4&Page=1&chklike=Y', 'suffix': '.TWO'},
@@ -87,13 +156,18 @@ def get_full_stock_list():
                 continue
 
             count = 0
+            skipped = 0
             for _, row in df.iterrows():
                 code = str(row[CODE_COL]).strip()
                 name = str(row[NAME_COL]).strip()
                 if code.isdigit() and len(code) == 4:
+                    # 資本額篩選：capital_filter 為 None 表示無法取得資料，不篩選
+                    if capital_filter is not None and code not in capital_filter:
+                        skipped += 1
+                        continue
                     all_items.append(f"{code}{cfg['suffix']}&{name}")
                     count += 1
-            log(f"✅ [{cfg['name']}] 取得 {count} 支股票")
+            log(f"✅ [{cfg['name']}] 取得 {count} 支股票（已排除資本額不足 {skipped} 支）")
         except Exception as e:
             log(f"❌ [{cfg['name']}] 取得股票清單失敗: {e}")
 
