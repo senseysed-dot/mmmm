@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from pathlib import Path
 from datetime import datetime
+from utils import safe_filename
 
 # ========== 核心參數設定 ==========
 MARKET_CODE = "tw-share"
@@ -33,7 +34,7 @@ def log(msg: str):
 def merge_data():
     """將 data/ 下的所有個股 CSV 合併為一份供 main.py 讀取（保留完整歷史，供策略計算指標用）"""
     log("🔄 正在合併所有個股數據...")
-    all_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv') and f != f"{MARKET_CODE}_latest.csv"]
+    all_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv') and f != f"{MARKET_CODE}_latest.csv" and not f.endswith('_60m.csv')]
     combined_data = []
     
     for f in all_files:
@@ -181,7 +182,7 @@ def download_stock_data(item):
     """下載單檔股票"""
     try:
         yf_tkr, name = item.split('&', 1)
-        safe_name = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        safe_name = safe_filename(name)
         out_path = os.path.join(DATA_DIR, f"{yf_tkr}_{safe_name}.csv")
         
         # 快取：今日已下載則跳過
@@ -190,7 +191,7 @@ def download_stock_data(item):
             if mtime == datetime.now().date(): return {"status": "exists", "tkr": yf_tkr}
 
         time.sleep(random.uniform(0.5, 1.0))
-        hist = yf.Ticker(yf_tkr).history(period="2y", timeout=10)  # 取 2 年確保週/月 MACD 有足夠資料
+        hist = yf.Ticker(yf_tkr).history(period="5y", timeout=10)  # 取 5 年確保月K有足夠 bar 數（MACD slow=26 需 ≥ 26 根月K）
         if not hist.empty:
             hist.reset_index(inplace=True)
             hist.columns = [c.lower() for c in hist.columns]
@@ -205,7 +206,7 @@ def download_stock_60m(item):
     """下載單檔股票的 60 分鐘 K 線資料（最近 60 天）"""
     try:
         yf_tkr, name = item.split('&', 1)
-        safe_name = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        safe_name = safe_filename(name)
         out_path = os.path.join(DATA_DIR, f"{yf_tkr}_{safe_name}_60m.csv")
 
         # 快取：今日已下載則跳過

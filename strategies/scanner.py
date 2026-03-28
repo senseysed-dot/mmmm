@@ -2,6 +2,9 @@
 import os
 import pandas as pd
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils import safe_filename
 
 # 最少回傳股票數（不足時自動降分填充）
 MIN_RESULTS = 10
@@ -155,12 +158,12 @@ def _analyze_symbol(group, data_dir=None):
 
     # ── 月K MACD ──────────────────────────────────────────────
     monthly_close = _resample_monthly(df)
-    monthly_hist  = _macd_hist(monthly_close) if len(monthly_close) >= 12 else pd.Series(dtype=float)
+    monthly_hist  = _macd_hist(monthly_close) if len(monthly_close) >= 26 else pd.Series(dtype=float)
 
     # ── 60分K MACD（可選，需先下載 60m 資料）─────────────────
     m60_hist = pd.Series(dtype=float)
     if data_dir:
-        safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '_', '-')).strip()
+        safe_name = safe_filename(name)
         m60_path  = os.path.join(data_dir, f"{symbol}_{safe_name}_60m.csv")
         if os.path.exists(m60_path):
             try:
