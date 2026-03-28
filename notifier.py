@@ -87,15 +87,17 @@ class StockNotifier:
         for _, row in stocks_df.iterrows():
             sym = str(row.get('symbol', '')).split('.')[0]   # 去除 .TW / .TWO 後綴
             nm  = str(row.get('name', sym))
-            close   = row.get('close', 0)
-            rsi     = row.get('rsi', 0)
+            close     = row.get('close', 0)
+            rsi       = row.get('rsi', 0)
             vol_ratio = row.get('量比', 0)
-            entry   = row.get('進場參考', close)
-            target  = row.get('目標價', 0)
-            stop    = row.get('停損價', 0)
+            entry     = row.get('進場參考', close)
+            target    = row.get('目標價', 0)
+            stop      = row.get('停損價', 0)
+            score     = int(row.get('score', 0)) if 'score' in row.index else None
+            score_str = f"｜⭐{score}分" if score is not None else ""
 
             lines.append(
-                f"📈 <b>{sym} {nm}</b>\n"
+                f"📈 <b>{sym} {nm}</b>{score_str}\n"
                 f"   💵 收:{close:.1f}｜RSI:{rsi:.1f}｜量比:{vol_ratio:.1f}x\n"
                 f"   🎯 進:{entry:.1f}｜目標:{target:.1f}｜停損:{stop:.1f}"
             )
