@@ -47,7 +47,7 @@ def run_single_scan(market_id, market_name):
     unique_stocks = stock_data['symbol'].nunique() if 'symbol' in stock_data.columns else 0
     print(f"  載入 {len(stock_data)} 行資料，共 {unique_stocks} 支個股")
 
-    selected = scan_stocks(stock_data)
+    selected = scan_stocks(stock_data, data_dir=DATA_DIR)
     print(f"  符合條件的強勢股: {len(selected)} 支")
     return selected
 

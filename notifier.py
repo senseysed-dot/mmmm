@@ -101,6 +101,9 @@ class StockNotifier:
                 f"   💵 收:{close:.1f}｜RSI:{rsi:.1f}｜量比:{vol_ratio:.1f}x\n"
                 f"   🎯 進:{entry:.1f}｜目標:{target:.1f}｜停損:{stop:.1f}"
             )
+            signals = str(row.get('signals', ''))
+            if signals:
+                lines.append(f"   📌 {signals}")
             lines.append("────────────────")
 
         # Telegram 單則訊息上限 4096 字元，超過時分批發送
