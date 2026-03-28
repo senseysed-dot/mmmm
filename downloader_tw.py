@@ -190,7 +190,7 @@ def download_stock_data(item):
             if mtime == datetime.now().date(): return {"status": "exists", "tkr": yf_tkr}
 
         time.sleep(random.uniform(0.5, 1.0))
-        hist = yf.Ticker(yf_tkr).history(period="6mo", timeout=10) # 取 6 個月確保 MA60 有足夠資料
+        hist = yf.Ticker(yf_tkr).history(period="2y", timeout=10)  # 取 2 年確保週/月 MACD 有足夠資料
         if not hist.empty:
             hist.reset_index(inplace=True)
             hist.columns = [c.lower() for c in hist.columns]
@@ -201,19 +201,58 @@ def download_stock_data(item):
         return {"status": "empty", "tkr": yf_tkr}
     except: return {"status": "error", "tkr": yf_tkr}
 
+def download_stock_60m(item):
+    """下載單檔股票的 60 分鐘 K 線資料（最近 60 天）"""
+    try:
+        yf_tkr, name = item.split('&', 1)
+        safe_name = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        out_path = os.path.join(DATA_DIR, f"{yf_tkr}_{safe_name}_60m.csv")
+
+        # 快取：今日已下載則跳過
+        if os.path.exists(out_path):
+            mtime = datetime.fromtimestamp(os.path.getmtime(out_path)).date()
+            if mtime == datetime.now().date():
+                return {"status": "exists", "tkr": yf_tkr}
+
+        time.sleep(random.uniform(0.3, 0.8))
+        hist = yf.Ticker(yf_tkr).history(period="60d", interval="1h", timeout=10)
+        if not hist.empty:
+            hist.reset_index(inplace=True)
+            hist.columns = [c.lower() for c in hist.columns]
+            # 統一日期時間格式（去除時區，與日K格式保持一致）
+            dt_col = 'datetime' if 'datetime' in hist.columns else 'date'
+            hist[dt_col] = pd.to_datetime(hist[dt_col]).dt.tz_localize(None)
+            hist.to_csv(out_path, index=False, encoding='utf-8-sig')
+            return {"status": "success", "tkr": yf_tkr}
+        return {"status": "empty", "tkr": yf_tkr}
+    except Exception as e:
+        log(f"⚠️ 60分K 下載失敗 [{item.split('&')[0] if '&' in item else item}]: {e}")
+        return {"status": "error", "tkr": item.split('&')[0] if '&' in item else item}
+
+
 def main():
     items = get_full_stock_list()
     log(f"🚀 啟動下載，目標總數: {len(items)}")
-    
+
+    # ── 日K（2年）下載 ──────────────────────────────────────
     stats = {"success": 0, "exists": 0, "empty": 0, "error": 0}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(download_stock_data, it): it for it in items}
-        for future in tqdm(as_completed(futures), total=len(items)):
+        for future in tqdm(as_completed(futures), total=len(items), desc="日K"):
             stats[future.result()["status"]] += 1
-            
-    # 完成下載後執行合併
+
+    # ── 60分K 下載 ──────────────────────────────────────────
+    log("🕐 開始下載 60 分鐘 K 線資料...")
+    stats_60m = {"success": 0, "exists": 0, "empty": 0, "error": 0}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures_60m = {executor.submit(download_stock_60m, it): it for it in items}
+        for future in tqdm(as_completed(futures_60m), total=len(items), desc="60分K"):
+            stats_60m[future.result()["status"]] += 1
+    log(f"📊 60分K 完成: 成功={stats_60m['success'] + stats_60m['exists']} 失敗={stats_60m['error'] + stats_60m['empty']}")
+
+    # ── 合併日K ─────────────────────────────────────────────
     merge_data()
-    
+
     report = {"total": len(items), "success": stats["success"] + stats["exists"], "fail": stats["error"] + stats["empty"]}
     log(f"📊 下載任務完成: {report}")
     return report
